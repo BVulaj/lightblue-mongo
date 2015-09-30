@@ -100,6 +100,20 @@ public class IterateAndUpdate implements DocUpdater {
                 if (updater.update(doc.getOutputDocument(), md.getFieldTreeRoot(), Path.EMPTY)) {
                     LOGGER.debug("Document {} modified, updating", docIndex);
                     PredefinedFields.updateArraySizes(md, nodeFactory, doc.getOutputDocument());
+                    try {
+                        ctx.getFactory().getInterceptors().callInterceptors(InterceptPoint.PRE_CRUD_UPDATE_DOC, ctx, doc);
+                        DBObject updatedObject = translator.toBson(doc.getOutputDocument());
+                        translator.addInvisibleFields(document, updatedObject, md);
+                        WriteResult result = new SaveCommand(collection, updatedObject).executeAndUnwrap();
+                        doc.setCRUDOperationPerformed(CRUDOperation.UPDATE);
+                        LOGGER.debug("Number of rows affected : ", result.getN());
+                        ctx.getFactory().getInterceptors().callInterceptors(InterceptPoint.POST_CRUD_UPDATE_DOC, ctx, doc);
+                        doc.startModifications();
+                    } catch (Exception e) {
+                        LOGGER.warn("Update exception for document {}: {}", docIndex, e);
+                        doc.addError(Error.get(MongoCrudConstants.ERR_UPDATE_ERROR, e.toString()));
+                        hasErrors = true;
+                    }
                     LOGGER.debug("Running constraint validations");
                     validator.clearErrors();
                     validator.validateDoc(doc.getOutputDocument());
@@ -120,22 +134,6 @@ public class IterateAndUpdate implements DocUpdater {
                         LOGGER.debug("Inaccesible fields during update={}" + paths);
                         if (paths != null && !paths.isEmpty()) {
                             doc.addError(Error.get("update", CrudConstants.ERR_NO_FIELD_UPDATE_ACCESS, paths.toString()));
-                            hasErrors = true;
-                        }
-                    }
-                    if (!hasErrors) {
-                        try {
-                            ctx.getFactory().getInterceptors().callInterceptors(InterceptPoint.PRE_CRUD_UPDATE_DOC, ctx, doc);
-                            DBObject updatedObject = translator.toBson(doc.getOutputDocument());
-                            translator.addInvisibleFields(document, updatedObject, md);
-                            WriteResult result = new SaveCommand(collection, updatedObject).executeAndUnwrap();
-                            doc.setCRUDOperationPerformed(CRUDOperation.UPDATE);
-                            LOGGER.debug("Number of rows affected : ", result.getN());
-                            ctx.getFactory().getInterceptors().callInterceptors(InterceptPoint.POST_CRUD_UPDATE_DOC, ctx, doc);
-                            doc.startModifications();
-                        } catch (Exception e) {
-                            LOGGER.warn("Update exception for document {}: {}", docIndex, e);
-                            doc.addError(Error.get(MongoCrudConstants.ERR_UPDATE_ERROR, e.toString()));
                             hasErrors = true;
                         }
                     }
